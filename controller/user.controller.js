@@ -6,6 +6,7 @@ import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { Product } from "../model/product.model.js";
 import { Notification } from "../model/notification.model.js";
+import { SubscriptionPlan } from "../model/subcriptionPlan.model.js";
 
 export const getDashboard = catchAsync(async (req, res) => {
   const user = await User.findById(req.user._id).populate("subscription");

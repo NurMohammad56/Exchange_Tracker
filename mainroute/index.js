@@ -12,7 +12,7 @@ const router = express.Router();
 // Mounting the routes
 router.use("/auth", authRoute);
 router.use("/user", userRoute);
-router.use("/product", productRoute);
+router.use("/products", productRoute);
 router.use("/subscription", subscriptionRoute);
 router.use("/notifications", notificationRoute);
 router.use("/admin", adminRoute);

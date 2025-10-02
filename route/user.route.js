@@ -1,6 +1,7 @@
 import express from "express";
 import {
   getProfile,
+  getDashboard,
   updateProfile,
   changePassword,
 } from "../controller/user.controller.js";
@@ -10,6 +11,7 @@ import upload from "../middleware/multer.middleware.js";
 const router = express.Router();
 
 router.get("/profile", protect, getProfile);
+router.get("/dashboard", protect, getDashboard);
 router.patch(
   "/update-profile",
   protect,
