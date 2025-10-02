@@ -102,9 +102,7 @@ export const addProduct = catchAsync(async (req, res) => {
     homePrice,
     homeCountry,
     homeCurrency,
-    foreignPrice,
-    foreignCountry,
-    foreignCurrency,
+    foreignComparisons = [],
     note,
     isSaved,
     isPurchase,
@@ -113,19 +111,36 @@ export const addProduct = catchAsync(async (req, res) => {
 
   await checkPlanLimits(req.user._id, "addProduct", req);
 
-  let image = {};
+  let image = {
+    public_id: "",
+    url: "",
+  };
+
   if (req.file) {
-    image = await uploadOnCloudinary(req.file.buffer);
+    const uploadResult = await uploadOnCloudinary(req.file.buffer);
+    image = {
+      public_id: uploadResult.public_id || "",
+      url: uploadResult.url || "",
+    };
   }
 
-  const imageUrl = image.url ? image.url : "";
+  // Normalize foreignComparisons
+  let processedComparisons = [];
+  if (Array.isArray(foreignComparisons)) {
+    for (let comp of foreignComparisons) {
+      let convertedPrice = comp.price ? parseFloat(comp.price) : null;
 
-  let convertedForeignPrice = foreignPrice ? parseFloat(foreignPrice) : null;
-  if (foreignPrice && homeCurrency !== foreignCurrency) {
-    const rate = await getExchangeRate(foreignCurrency, homeCurrency);
-    convertedForeignPrice = parseFloat(
-      (parseFloat(foreignPrice) * rate).toFixed(2)
-    );
+      if (comp.currency && comp.currency !== homeCurrency) {
+        const rate = await getExchangeRate(comp.currency, homeCurrency);
+        convertedPrice = parseFloat((parseFloat(comp.price) * rate).toFixed(2));
+      }
+
+      processedComparisons.push({
+        country: comp.country,
+        currency: comp.currency,
+        price: convertedPrice,
+      });
+    }
   }
 
   const product = await Product.create({
@@ -133,13 +148,11 @@ export const addProduct = catchAsync(async (req, res) => {
     name,
     brand,
     category,
-    image: imageUrl,
+    image: image,
     homePrice: parseFloat(homePrice),
     homeCountry,
     homeCurrency,
-    foreignPrice: convertedForeignPrice,
-    foreignCountry,
-    foreignCurrency,
+    foreignComparisons: processedComparisons,
     note,
     isSaved: isSaved === "true" || isSaved === true,
     isPurchase: isPurchase === "true" || isPurchase === true,
@@ -156,6 +169,8 @@ export const addProduct = catchAsync(async (req, res) => {
       $addToSet: { purchases: product._id },
     });
   }
+
+  // Update total & avg savings
   const userProducts = await Product.find({ user: req.user._id });
   const totalSavings = userProducts.reduce(
     (sum, p) => sum + p.calculateSavings(),
@@ -166,6 +181,7 @@ export const addProduct = catchAsync(async (req, res) => {
     : 0;
   await User.findByIdAndUpdate(req.user._id, { totalSavings, avgSavings });
 
+  // Notification
   const user = await User.findById(req.user._id);
   if (user.enableNotifications && category !== "other") {
     const newNotif = await Notification.create({
@@ -242,7 +258,7 @@ export const getProducts = catchAsync(async (req, res, next) => {
 export const getProduct = catchAsync(async (req, res) => {
   const product = await Product.findById(req.params.id).populate(
     "user",
-    "name avatar email phone, currentPlan, "
+    "name email phone avatar subscription"
   );
   if (!product || product.user._id.toString() !== req.user._id.toString()) {
     throw new AppError(httpStatus.NOT_FOUND, "Product not found");
@@ -250,78 +266,75 @@ export const getProduct = catchAsync(async (req, res) => {
 
   const { showAds } = await checkPlanLimits(req.user._id, "getProduct", req);
 
-  // Multi-country comparison (Figma: Home + 2 others; limit to 3 for free, more on paid)
-  const user = await User.findById(req.user._id).populate("subscription");
-  const plan = await SubscriptionPlan.findOne({ name: user.currentPlan });
-  const maxCountries = plan.maxCurrencies || 1; // Free: 1 (home only), Paid: 3+
-
-  // Default countries for comparison (from enum; home + France/Germany)
-  let compareCountries = [
+  let comparisons = [
     {
       country: product.homeCountry,
       currency: product.homeCurrency,
-      price: product.homePrice,
+      originalPrice: product.homePrice,
       isHome: true,
     },
   ];
-  if (maxCountries > 1) {
-    compareCountries.push(
-      {
-        country: "France",
-        currency: "Euro",
-        price: product.foreignPrice || 800,
-      },
-      {
-        country: "Germany",
-        currency: "Euro",
-        price: product.foreignPrice || 780,
-      }
+
+  if (product.foreignComparisons && product.foreignComparisons.length > 0) {
+    comparisons = comparisons.concat(
+      product.foreignComparisons.map((comp) => ({
+        country: comp.country,
+        currency: comp.currency,
+        originalPrice: comp.price,
+        isHome: false,
+      }))
     );
   }
 
-  let comparisons = [];
-  let rates = {};
-  for (let country of compareCountries) {
-    let convertedPrice = country.price;
-    if (country.currency !== product.homeCurrency) {
-      const rate = await getExchangeRate(
-        country.currency,
-        product.homeCurrency
-      );
-      convertedPrice = parseFloat((country.price * rate).toFixed(2));
+  // Convert all to homeCurrency + calcs (per Figma)
+  let detailedComparisons = [];
+  for (let comp of comparisons) {
+    let convertedPrice = comp.originalPrice;
+    if (comp.currency !== product.homeCurrency) {
+      const rate = await getExchangeRate(comp.currency, product.homeCurrency);
+      convertedPrice = parseFloat((comp.originalPrice * rate).toFixed(2));
     }
-    const estTax = convertedPrice * 0.1;
+    const estTaxRate = comp.country === "USA" ? 0.1 : 0.08;
+    const vatRate = comp.country === "USA" ? 0 : 0.2;
+    const estTax = convertedPrice * estTaxRate;
     const totalPrice = convertedPrice + estTax;
-    const vatRefund = convertedPrice * (product.vatRefundPercent / 100);
+    const vatRefund = convertedPrice * vatRate;
     const estRealPrice = totalPrice - vatRefund;
 
-    comparisons.push({
-      country: country.country,
-      currency: country.currency,
-      originalPrice: country.price,
-      convertedPrice,
-      estTax,
-      totalPrice,
-      vatRefund,
-      estRealPrice,
-      isHome: country.isHome,
+    detailedComparisons.push({
+      country: comp.country,
+      currency: comp.currency,
+      originalPrice: comp.originalPrice,
+      convertedPrice: parseFloat(convertedPrice.toFixed(2)),
+      estTax: parseFloat(estTax.toFixed(2)),
+      totalPrice: parseFloat(totalPrice.toFixed(2)),
+      vatRefund: parseFloat(vatRefund.toFixed(2)),
+      estRealPrice: parseFloat(estRealPrice.toFixed(2)),
+      isHome: comp.isHome,
     });
   }
 
-  const cheapest = comparisons
-    .filter((c) => !c.isHome)
-    .sort((a, b) => a.estRealPrice - b.estRealPrice)[0];
-  const savings = product.homePrice - (cheapest ? cheapest.estRealPrice : 0);
-  const savingsPercent = ((savings / product.homePrice) * 100).toFixed(2);
+  // Cheapest non-home
+  const nonHome = detailedComparisons.filter((c) => !c.isHome);
+  const cheapest = nonHome.length
+    ? nonHome.reduce((min, c) => (c.estRealPrice < min.estRealPrice ? c : min))
+    : null;
+  const homeEstReal = detailedComparisons.find((c) => c.isHome).estRealPrice;
+  const savings = cheapest
+    ? parseFloat((homeEstReal - cheapest.estRealPrice).toFixed(2))
+    : 0;
+  const savingsPercent = cheapest
+    ? parseFloat(((savings / homeEstReal) * 100).toFixed(2))
+    : 0;
 
   const productWithCalcs = product.toJSON();
-  productWithCalcs.comparisons = comparisons;
+  productWithCalcs.detailedComparisons = detailedComparisons;
   productWithCalcs.cheapestCountry = cheapest ? cheapest.country : null;
-  productWithCalcs.savings = savings.toFixed(2);
+  productWithCalcs.savings = savings;
   productWithCalcs.savingsPercent = savingsPercent;
   productWithCalcs.showAds = showAds;
 
-  if (savingsPercent > 5 && user.enableNotifications) {
+  if (savingsPercent > 5) {
     const newNotif = await Notification.create({
       user: req.user._id,
       title: "Savings Alert",
@@ -342,25 +355,53 @@ export const getProduct = catchAsync(async (req, res) => {
 
 export const updateProduct = catchAsync(async (req, res) => {
   let updateData = req.body;
-  let image = {};
+
+  // Handle image upload
   if (req.file) {
-    image = await uploadOnCloudinary(req.file.path);
-    updateData.image = image;
+    const uploadResult = await uploadOnCloudinary(req.file.buffer);
+    updateData.image = {
+      public_id: uploadResult.public_id || "",
+      url: uploadResult.url || "",
+    };
   }
 
-  let convertedForeignPrice = foreignPrice;
-  if (foreignPrice && homeCurrency !== foreignCurrency) {
-    const rate = await getExchangeRate(foreignCurrency, homeCurrency);
-    convertedForeignPrice = parseFloat((foreignPrice * rate).toFixed(2));
+  // Handle foreignComparisons array
+  if (
+    updateData.foreignComparisons &&
+    Array.isArray(updateData.foreignComparisons)
+  ) {
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      throw new AppError(httpStatus.NOT_FOUND, "Product not found");
+    }
+
+    let processedComparisons = [];
+    for (let comp of updateData.foreignComparisons) {
+      let convertedPrice = comp.price ? parseFloat(comp.price) : null;
+
+      if (comp.currency && comp.currency !== product.homeCurrency) {
+        const rate = await getExchangeRate(comp.currency, product.homeCurrency);
+        convertedPrice = parseFloat((parseFloat(comp.price) * rate).toFixed(2));
+      }
+
+      processedComparisons.push({
+        country: comp.country,
+        currency: comp.currency,
+        price: convertedPrice,
+      });
+    }
+    updateData.foreignComparisons = processedComparisons;
   }
 
   const product = await Product.findByIdAndUpdate(req.params.id, updateData, {
     new: true,
   }).populate("user");
+
   if (!product || product.user._id.toString() !== req.user._id.toString()) {
     throw new AppError(httpStatus.NOT_FOUND, "Product not found");
   }
 
+  // Recalculate savings
   const userProducts = await Product.find({ user: req.user._id });
   const totalSavings = userProducts.reduce(
     (sum, p) => sum + p.calculateSavings(),
