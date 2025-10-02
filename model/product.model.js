@@ -44,6 +44,26 @@ const currencyEnum = [
   "Other",
 ];
 
+const foreignComparisonSchema = new Schema(
+  {
+    country: {
+      type: String,
+      enum: countryEnum,
+      required: false,
+    },
+    currency: {
+      type: String,
+      enum: currencyEnum,
+      required: false,
+    },
+    price: {
+      type: Number,
+      required: false,
+    },
+  },
+  { _id: false }
+);
+
 const productSchema = new Schema(
   {
     user: {
@@ -88,16 +108,9 @@ const productSchema = new Schema(
       enum: currencyEnum,
       required: true,
     },
-    foreignPrice: {
-      type: Number,
-    },
-    foreignCountry: {
-      type: String,
-      enum: countryEnum,
-    },
-    foreignCurrency: {
-      type: String,
-      enum: currencyEnum,
+    foreignComparisons: {
+      type: [foreignComparisonSchema],
+      default: [],
     },
     note: {
       type: String,
@@ -119,21 +132,40 @@ const productSchema = new Schema(
 );
 
 productSchema.methods.calculateSavings = function () {
-  if (!this.foreignPrice || !this.homePrice) return 0;
-  const priceDiff = this.homePrice - this.foreignPrice;
-  const vatRefund = (this.foreignPrice * this.vatRefundPercent) / 100;
-  return priceDiff + vatRefund;
+  let totalSavings = (this.homePrice * this.vatRefundPercent) / 100; // Always home VAT
+  if (this.foreignComparisons && this.foreignComparisons.length > 0) {
+    const validComps = this.foreignComparisons.filter(
+      (comp) => comp && comp.price && typeof comp.price === "number"
+    );
+    validComps.forEach((comp) => {
+      totalSavings +=
+        this.homePrice -
+        comp.price +
+        (comp.price * this.vatRefundPercent) / 100;
+    });
+  }
+  return totalSavings;
 };
 
 productSchema.methods.calculatePercentDiff = function () {
-  if (!this.foreignPrice || !this.homePrice) return 0;
-  return ((this.homePrice - this.foreignPrice) / this.homePrice) * 100;
+  if (!this.foreignComparisons || this.foreignComparisons.length === 0)
+    return 0;
+  const validComps = this.foreignComparisons.filter(
+    (comp) => comp && comp.price && typeof comp.price === "number"
+  );
+  if (validComps.length === 0) return 0;
+  const avgForeign =
+    validComps.reduce((sum, comp) => sum + comp.price, 0) / validComps.length;
+  return ((this.homePrice - avgForeign) / this.homePrice) * 100;
 };
 
 productSchema.methods.toJSON = function () {
   const product = this.toObject();
   product.savings = this.calculateSavings();
   product.percentDiff = this.calculatePercentDiff();
+  product.foreignComparisons = product.foreignComparisons.filter(
+    (comp) => comp && comp.country && comp.currency
+  );
   return product;
 };
 

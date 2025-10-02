@@ -6,12 +6,15 @@ import { Coupon } from "../model/coupon.model.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
+import { PaymentInfo } from "../model/payment.model.js";
 
 export const adminDashboard = catchAsync(async (req, res) => {
   const totalSubscriptions = await UserSubscription.countDocuments({
     status: "active",
   });
+
   const totalCoupons = await Coupon.countDocuments({ status: "active" });
+
   const totalSalesAgg = await UserSubscription.aggregate([
     { $match: { status: "active" } },
     {
@@ -27,15 +30,80 @@ export const adminDashboard = catchAsync(async (req, res) => {
   ]);
   const totalSales = totalSalesAgg[0]?.total || 0;
 
-  const { period = "month" } = req.query;
+  const { period = "month" } = req.query; // "week" | "month" | "year"
   const match = { status: "active" };
-  const groupBy =
-    period === "year" ? { $year: "$startDate" } : { $month: "$startDate" };
-  const overviewData = await UserSubscription.aggregate([
-    { $match: match },
-    { $group: { _id: groupBy, count: { $sum: 1 } } },
-    { $sort: { _id: 1 } },
-  ]);
+
+  let overviewData;
+
+  if (period === "year") {
+    overviewData = await UserSubscription.aggregate([
+      { $match: match },
+      { $group: { _id: { $year: "$startDate" }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
+
+    overviewData = overviewData.map((d) => ({
+      year: d._id,
+      count: d.count,
+    }));
+  } else if (period === "week") {
+    overviewData = await UserSubscription.aggregate([
+      {
+        $match: {
+          ...match,
+          startDate: {
+            $gte: new Date(new Date().getFullYear(), 0, 1),
+          },
+        },
+      },
+      {
+        $group: {
+          _id: { $isoWeek: "$startDate" },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    const weeksInYear = 52;
+    const filledWeeks = Array.from({ length: weeksInYear }, (_, i) => {
+      const found = overviewData.find((d) => d._id === i + 1);
+      return {
+        week: `Week ${i + 1}`,
+        count: found ? found.count : 0,
+      };
+    });
+    overviewData = filledWeeks;
+  } else {
+    overviewData = await UserSubscription.aggregate([
+      { $match: match },
+      { $group: { _id: { $month: "$startDate" }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
+
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const filledMonths = months.map((m, idx) => {
+      const found = overviewData.find((d) => d._id === idx + 1);
+      return {
+        month: m,
+        count: found ? found.count : 0,
+      };
+    });
+    overviewData = filledMonths;
+  }
 
   const totalPayments = await PaymentInfo.countDocuments();
   const pendingPayments = await PaymentInfo.countDocuments({
@@ -44,6 +112,7 @@ export const adminDashboard = catchAsync(async (req, res) => {
   const failedPayments = await PaymentInfo.countDocuments({
     paymentStatus: "failed",
   });
+
   const paymentOverview = await PaymentInfo.aggregate([
     {
       $match: { createdAt: { $gte: new Date(new Date().getFullYear(), 0, 1) } },
