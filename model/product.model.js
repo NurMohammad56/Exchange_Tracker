@@ -1,4 +1,5 @@
 import mongoose, { Schema } from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const categoryEnum = [
   "shoes",
@@ -27,11 +28,13 @@ const countryEnum = [
   "Portugal",
   "Switzerland",
   "UK",
+  "USA",
   "Other",
 ];
 
 const currencyEnum = [
   "Euro",
+  "USD",
   "Danish Krone",
   "Norwegian Krone",
   "Yen",
@@ -133,5 +136,7 @@ productSchema.methods.toJSON = function () {
   product.percentDiff = this.calculatePercentDiff();
   return product;
 };
+
+productSchema.plugin(mongoosePaginate);
 
 export const Product = mongoose.model("Product", productSchema);

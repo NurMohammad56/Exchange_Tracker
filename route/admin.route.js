@@ -10,6 +10,7 @@ import {
   addCoupon,
   updateCoupon,
   toggleCoupon,
+  deleteCoupon,
 } from "../controller/admin.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
@@ -25,5 +26,6 @@ router.get("/coupons", protect, getCoupons);
 router.post("/coupons", protect, addCoupon);
 router.put("/coupons/:id", protect, updateCoupon);
 router.patch("/coupons/:id", protect, toggleCoupon);
+router.delete("/coupons/:id", protect, deleteCoupon);
 
 export default router;

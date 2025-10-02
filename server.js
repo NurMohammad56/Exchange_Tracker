@@ -61,7 +61,7 @@ io.on("connection", (socket) => {
 });
 
 // Real-time Currency Fetching (every 5 min)
-const EXCHANGE_API_BASE = "https://v6.exchangerate-api.com/v6";
+const EXCHANGE_API_BASE = "https://api.exchangeratesapi.io/v1";
 const API_KEY = process.env.EXCHANGE_RATE_API_KEY;
 
 const fetchAndBroadcastRates = async () => {

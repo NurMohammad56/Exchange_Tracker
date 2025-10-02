@@ -145,6 +145,12 @@ export const toggleSubscriptionPlan = catchAsync(async (req, res) => {
   let plan;
   if (action === "delete") {
     plan = await SubscriptionPlan.findByIdAndDelete(req.params.id);
+  } else if (action === "inactive") {
+    plan = await SubscriptionPlan.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    );
   } else {
     plan = await SubscriptionPlan.findByIdAndUpdate(
       req.params.id,
@@ -190,6 +196,17 @@ export const updateCoupon = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "Coupon updated successfully",
+    data: coupon,
+  });
+});
+
+export const deleteCoupon = catchAsync(async (req, res) => {
+  const coupon = await Coupon.findByIdAndDelete(req.params.id);
+  if (!coupon) throw new AppError(httpStatus.NOT_FOUND, "Coupon not found");
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Coupon deleted successfully",
     data: coupon,
   });
 });

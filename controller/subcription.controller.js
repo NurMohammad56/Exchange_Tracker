@@ -55,6 +55,7 @@ export const createSubscriptionPayment = catchAsync(async (req, res) => {
       status: "active",
       applicablePlans: { $in: [plan.name] },
     });
+
     if (
       !coupon ||
       new Date() > coupon.expiryDate ||
@@ -99,7 +100,7 @@ export const createSubscriptionPayment = catchAsync(async (req, res) => {
     amount: Math.round(finalPrice * 100),
     currency: "usd",
     customer: customer.id,
-    automatic_payment_methods: { enabled: true },
+    automatic_payment_methods: { enabled: true, allow_redirects: "never" },
     metadata: {
       userId: userId.toString(),
       planId: planId.toString(),
