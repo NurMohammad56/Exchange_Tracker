@@ -26,15 +26,15 @@ const getExchangeRate = async (fromCurrency, toCurrency) => {
     if (response.data.success) {
       return response.data.rates[toCurrency];
     } else {
-      console.log("API Response Error:", response.data); // Log for debug
+      console.log("API Response Error:", response.data); 
       throw new Error("Invalid response");
     }
   } catch (error) {
     console.log(
       "Exchange Rate Error Details:",
       error.response?.data || error.message
-    ); // Log API error (e.g., quota)
-    return 1; // Fallback rate to prevent crash (no conversion)
+    ); 
+    return 1; 
   }
 };
 
